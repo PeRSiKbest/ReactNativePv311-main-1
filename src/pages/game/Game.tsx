@@ -1,4 +1,4 @@
-import { Animated, Pressable, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View, Modal } from "react-native";
 import { useEffect, useState } from "react";
 import RNFS from "react-native-fs";
 
@@ -24,6 +24,7 @@ const opacityValues = Array.from({length: 16}, () => new Animated.Value(1));
 const scaleValues   = Array.from({length: 16}, () => new Animated.Value(1));
 let scoreAnim = new Animated.Value(1);
 
+// колір плиток
 function tileBackground(tileValue: number) {
     return tileValue == 0 ? "#BDAFA2"
     : tileValue == 2      ? "#EEE3DB"
@@ -44,6 +45,7 @@ function tileBackground(tileValue: number) {
                           : "#f14af7ff";
 }
 
+//колір цифр
 function tileForeground(tileValue: number) {
     return tileValue == 0 ? "#BDAFA2"
     : tileValue == 2      ? "#746C63"
@@ -75,6 +77,9 @@ export default function Game() {
     const [score, setScore] = useState(0);
     const [bestScore, setBestScore] = useState(4);
     const [savedField, setSavedField] = useState(null as FieldState|null);
+
+    const [win, setWin] = useState(false);
+    const [gameOver, setGameOver] = useState(false);
  
     useEffect(() => {
         loadBestScore();   
@@ -115,6 +120,7 @@ export default function Game() {
         return RNFS.readFile(path, 'utf8')
         .then(str => {
             setBestScore(Number(str));
+        }).catch(() => {
         })
     };
 
@@ -131,6 +137,10 @@ export default function Game() {
         setTiles(savedField!.tiles);
         setScore(savedField!.score);
         setBestScore(savedField!.bestScore);
+        // після відкату скидаємо savedField, щоб undo був лише на 1 крок
+        setSavedField(null);
+        setWin(false);
+        setGameOver(false);
     };
 
     const tileFontSize = (tileValue: number) => {
@@ -143,6 +153,7 @@ export default function Game() {
 
     const [text,setText] = useState("Game");
     var startData: EventData|null = null;
+
     const detectSwipe = (finishData: EventData) => {
         if(startData == null) return;
         const dx = finishData.x - startData!.x;
@@ -153,6 +164,7 @@ export default function Game() {
                 if(Math.abs(dx) > distanceThreshold) {
                     if(dx > 0) {
                         if( canMoveRight() ) {
+                            saveField();
                             moveRight();
                             setText("Right - OK");
                             spawnTile();
@@ -163,7 +175,9 @@ export default function Game() {
                         }
                     }
                     else {
-                        if( moveLeft() ) {
+                        if( canMoveLeft() ) {
+                            saveField();
+                            moveLeft();
                             setText("Left - OK");
                             spawnTile();
                             setTiles([...tiles]);
@@ -177,7 +191,9 @@ export default function Game() {
             else {
                 if(Math.abs(dy) > distanceThreshold) {
                     if(dy > 0) {
-                        if (moveDown()) {
+                        if ( canMoveDown() ) {
+                            saveField();
+                            moveDown();
                             setText("Down - OK");
                             spawnTile();
                             setTiles([...tiles]);
@@ -198,7 +214,9 @@ export default function Game() {
                         ]).start();
                     }
                     else {
-                        if (moveUp()) {
+                        if ( canMoveUp() ) {
+                            saveField();
+                            moveUp();
                             setText("Up - OK");
                             spawnTile();
                             setTiles([...tiles]);
@@ -242,55 +260,11 @@ export default function Game() {
         spawnTile();
         setTiles([...tiles]);
         setScore(0);
+        setSavedField(null);
+        setWin(false);
+        setGameOver(false);
     };
 
-    const moveLeft = () => {
-        const N = 4;
-        let res = false;
-        for(let r = 0; r < N; r += 1) {
-            for(let i = 1; i < N; i += 1) {
-                for(let c = 0; c < N - 1; c += 1 ) {
-                    if( tiles[r*N + c + 1] != 0 && tiles[r*N + c] == 0 ) {
-                        tiles[r*N + c] = tiles[r*N + c + 1];
-                        tiles[r*N + c + 1] = 0;
-                        res = true;
-                    }
-                }
-            }
-
-            for(let c = 0; c < N - 1; c += 1) {
-                if( tiles[r*N+c] != 0 && tiles[r*N+c+1] == tiles[r*N+c]){
-                    tiles[r*N+c] *= 2;
-                    tiles[r*N+c+1] = 0;
-                    setScore(score + tiles[r*N+c]);
-                    res = true;
-                }
-            }
-
-            for(let i = 1; i < N; i += 1) {
-                for(let c = 0; c < N - 1; c += 1 ) {
-                    if( tiles[r*N + c + 1] != 0 && tiles[r*N + c] == 0 ) {
-                        tiles[r*N + c] = tiles[r*N + c + 1];
-                        tiles[r*N + c + 1] = 0;
-                    }
-                }
-            }
-        }
-        return res;
-    };
-
-    const canMoveRight = () => {
-        for(let r = 0; r < N; r += 1) {
-            for(let c = 1; c < N; c += 1) {
-                if( tiles[r*N + c - 1] != 0 && (
-                     tiles[r*N + c - 1] == tiles[r*N + c] || tiles[r*N + c] == 0 )
-                ) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
 
     const moveRight = () => {
         const N = 4;
@@ -341,8 +315,59 @@ export default function Game() {
         }
     };
 
+    const moveLeft = () => {
+        let res = false;
+        let collapsedIndexes: number[] = [];
+
+        for(let r = 0; r < N; r++) {
+            for(let i = 1; i < N; i++) {
+                for(let c = 0; c < N-1; c++) {
+                    if(tiles[r*N + c] == 0 && tiles[r*N + c + 1] != 0) {
+                        tiles[r*N + c] = tiles[r*N + c + 1];
+                        tiles[r*N + c + 1] = 0;
+                        res = true;
+                    }
+                }
+            }
+
+            for(let c = 0; c < N-1; c++) {
+                if(tiles[r*N + c] != 0 && tiles[r*N + c] == tiles[r*N + c + 1]) {
+                    tiles[r*N + c] *= 2;
+                    tiles[r*N + c + 1] = 0;
+                    setScore(score + tiles[r*N + c]);
+                    collapsedIndexes.push(r*N + c);
+                    res = true;
+                }
+            }
+
+            for(let i = 1; i < N; i++) {
+                for(let c = 0; c < N-1; c++) {
+                    if(tiles[r*N + c] == 0 && tiles[r*N + c + 1] != 0) {
+                        tiles[r*N + c] = tiles[r*N + c + 1];
+                        tiles[r*N + c + 1] = 0;
+                    }
+                }
+            }
+        }
+
+        if(collapsedIndexes.length > 0) {
+            Animated.parallel(
+                collapsedIndexes.map(index => 
+                    Animated.sequence([
+                        Animated.timing(scaleValues[index], { toValue: 1.2, duration: 150, useNativeDriver: true }),
+                        Animated.timing(scaleValues[index], { toValue: 1.0, duration: 150, useNativeDriver: true }),
+                    ])
+                )
+            ).start();
+        }
+
+        return res;
+    };
+
     const moveUp = () => {
         let res = false;
+        let collapsedIndexes: number[] = [];
+
         for(let c = 0; c < N; c++) {
             for(let i = 1; i < N; i++) {
                 for(let r = 1; r < N; r++) {
@@ -353,14 +378,17 @@ export default function Game() {
                     }
                 }
             }
+
             for(let r = 1; r < N; r++) {
                 if(tiles[r*N + c] != 0 && tiles[(r-1)*N + c] == tiles[r*N + c]) {
                     tiles[(r-1)*N + c] *= 2;
                     tiles[r*N + c] = 0;
                     setScore(score + tiles[(r-1)*N + c]);
+                    collapsedIndexes.push((r-1)*N + c);
                     res = true;
                 }
             }
+
             for(let i = 1; i < N; i++) {
                 for(let r = 1; r < N; r++) {
                     if(tiles[(r-1)*N + c] == 0 && tiles[r*N + c] != 0) {
@@ -370,11 +398,25 @@ export default function Game() {
                 }
             }
         }
+
+        if(collapsedIndexes.length > 0) {
+            Animated.parallel(
+                collapsedIndexes.map(index => 
+                    Animated.sequence([
+                        Animated.timing(scaleValues[index], { toValue: 1.2, duration: 150, useNativeDriver: true }),
+                        Animated.timing(scaleValues[index], { toValue: 1.0, duration: 150, useNativeDriver: true }),
+                    ])
+                )
+            ).start();
+        }
+
         return res;
     };
 
     const moveDown = () => {
         let res = false;
+        let collapsedIndexes: number[] = [];
+
         for(let c = 0; c < N; c++) {
             for(let i = 1; i < N; i++) {
                 for(let r = N-2; r >= 0; r--) {
@@ -385,14 +427,17 @@ export default function Game() {
                     }
                 }
             }
+
             for(let r = N-2; r >= 0; r--) {
                 if(tiles[r*N + c] != 0 && tiles[(r+1)*N + c] == tiles[r*N + c]) {
                     tiles[(r+1)*N + c] *= 2;
                     tiles[r*N + c] = 0;
                     setScore(score + tiles[(r+1)*N + c]);
+                    collapsedIndexes.push((r+1)*N + c);
                     res = true;
                 }
             }
+
             for(let i = 1; i < N; i++) {
                 for(let r = N-2; r >= 0; r--) {
                     if(tiles[(r+1)*N + c] == 0 && tiles[r*N + c] != 0) {
@@ -402,8 +447,86 @@ export default function Game() {
                 }
             }
         }
+
+        if(collapsedIndexes.length > 0) {
+            Animated.parallel(
+                collapsedIndexes.map(index => 
+                    Animated.sequence([
+                        Animated.timing(scaleValues[index], { toValue: 1.2, duration: 150, useNativeDriver: true }),
+                        Animated.timing(scaleValues[index], { toValue: 1.0, duration: 150, useNativeDriver: true }),
+                    ])
+                )
+            ).start();
+        }
+
         return res;
     };
+
+
+    const canMoveLeft = () => {
+        for(let r = 0; r < N; r += 1) {
+            for(let c = 1; c < N; c += 1) {
+                const curr = tiles[r*N + c];
+                const left = tiles[r*N + (c - 1)];
+                if (curr !== 0 && (left === 0 || left === curr)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    const canMoveRight = () => {
+        for(let r = 0; r < N; r += 1) {
+            for(let c = 0; c < N - 1; c += 1) {
+                const curr = tiles[r*N + c];
+                const right = tiles[r*N + (c + 1)];
+                if (curr !== 0 && (right === 0 || right === curr)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    const canMoveUp = () => {
+        for(let r = 1; r < N; r += 1) {
+            for(let c = 0; c < N; c += 1) {
+                const curr = tiles[r*N + c];
+                const up = tiles[(r - 1)*N + c];
+                if (curr !== 0 && (up === 0 || up === curr)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    const canMoveDown = () => {
+        for(let r = 0; r < N - 1; r += 1) {
+            for(let c = 0; c < N; c += 1) {
+                const curr = tiles[r*N + c];
+                const down = tiles[(r + 1)*N + c];
+                if (curr !== 0 && (down === 0 || down === curr)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+
+    useEffect(() => {
+        if (tiles.includes(2048)) {
+            setWin(true);
+        }
+        const hasEmpty = tiles.some(t => t === 0);
+        if (!hasEmpty && !canMoveLeft() && !canMoveRight() && !canMoveUp() && !canMoveDown()) {
+            setGameOver(true);
+        } else {
+            setGameOver(false);
+        }
+    }, [tiles]);
 
     return <View style={styles.container}>
         <View style={[styles.topBlock, {marginHorizontal: width * 0.025}]}>
@@ -428,7 +551,7 @@ export default function Game() {
 
                 <View style={styles.topBlockButtons}>
                     <Pressable style={styles.topBlockButton} onPress={newGame}><Text style={styles.topBlockButtonText}>NEW</Text></Pressable>
-                    <Pressable style={styles.topBlockButton} onPress={undoField}><Text style={styles.topBlockButtonText}>UNDO</Text></Pressable>
+                    <Pressable style={[styles.topBlockButton, savedField ? {} : {opacity: 0.5}]} onPress={undoField}><Text style={styles.topBlockButtonText}>UNDO</Text></Pressable>
                 </View>
             </View>
         </View>
@@ -472,6 +595,36 @@ export default function Game() {
         <Animated.View style={{opacity: animValue}}>
             <Text>{text}</Text>
         </Animated.View>
+
+        {/* WIN */}
+        <Modal transparent={true} visible={win} animationType="fade" onRequestClose={() => setWin(false)}>
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalBox}>
+                    <Text style={styles.modalTitle}>🎉 Вітаємо!</Text>
+                    <Text style={{marginBottom: 12}}>Ви досягли 2048!</Text>
+                    <View style={{flexDirection: "row"}}>
+                        <Pressable style={[styles.topBlockButton, {marginRight: 10}]} onPress={() => setWin(false)}>
+                            <Text style={styles.topBlockButtonText}>Продовжити</Text>
+                        </Pressable>
+                        <Pressable style={styles.topBlockButton} onPress={() => { setWin(false); newGame(); }}>
+                            <Text style={styles.topBlockButtonText}>Нова гра</Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+
+        {/* GAME OVER modal */}
+        <Modal transparent={true} visible={gameOver} animationType="fade" onRequestClose={() => setGameOver(false)}>
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalBox}>
+                    <Text style={styles.modalTitle}>❌ Гра закінчена</Text>
+                    <Pressable style={styles.modalButton} onPress={() => { newGame(); }}>
+                        <Text style={styles.modalButtonText}>Нова гра</Text>
+                    </Pressable>
+                </View>
+            </View>
+        </Modal>
         
     </View>
     ;
@@ -557,5 +710,34 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     textAlign: "center",
     verticalAlign: "middle"
-  }
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  modalBox: {
+    backgroundColor: "white",
+    padding: 16,
+    borderRadius: 8,
+    alignItems: "center"
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 6
+  },
+  modalButton: {
+  backgroundColor: "#6a5acd",
+  paddingVertical: 8,
+  paddingHorizontal: 16,
+  borderRadius: 8,
+  marginHorizontal: 5,
+},
+modalButtonText: {
+  color: "white",
+  fontSize: 16,
+  fontWeight: "bold",
+},
 });
