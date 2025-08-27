@@ -1,6 +1,5 @@
 import { Animated, Pressable, StyleSheet, Text, TouchableWithoutFeedback, useWindowDimensions, View } from "react-native";
-import { AppContext } from "../../shared/context/AppContext";
-import { useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import RNFS from "react-native-fs";
 
 type EventData = {
@@ -15,31 +14,34 @@ type FieldState = {
     bestScore: number
 };
 
-const distanceThreshold = 50;  // поріг спрацьовування свайпу (мін. відстань проведення)
-const timeThreshold = 500;     // поріг спрацьовування свайпу (макс. час проведення)
+const distanceThreshold = 50;
+const timeThreshold = 500;
 const bestScoreFilename = '/best.score';
 const N = 4;
-
 
 let animValue = new Animated.Value(1);
 const opacityValues = Array.from({length: 16}, () => new Animated.Value(1));
 const scaleValues   = Array.from({length: 16}, () => new Animated.Value(1));
+let scoreAnim = new Animated.Value(1);
 
 function tileBackground(tileValue: number) {
     return tileValue == 0 ? "#BDAFA2"
     : tileValue == 2      ? "#EEE3DB"
     : tileValue == 4      ? "#EEE1D0"
-    : tileValue == 8      ? "#E8B486"
-    : tileValue == 16     ? "#E79B73"
-    : tileValue == 32     ? "#E4846E"
-    : tileValue == 64     ? "#E26A51"
-    : tileValue == 128    ? "#bbb"
-    : tileValue == 256    ? "#bbb"
-    : tileValue == 512    ? "#bbb"
-    : tileValue == 1024   ? "#bbb"
-    : tileValue == 2048   ? "#bbb"
-    : tileValue == 4096   ? "#bbb"
-                          : "#bbb";
+    : tileValue == 8      ? "#d5e641ff"
+    : tileValue == 16     ? "#dbe91aff"
+    : tileValue == 32     ? "#e0d100ff"
+    : tileValue == 64     ? "#f08a76ff"
+    : tileValue == 128    ? "#fd5f5fff"
+    : tileValue == 256    ? "#ff4343ff"
+    : tileValue == 512    ? "#ff0000ff"
+    : tileValue == 1024   ? "#6070ffff"
+    : tileValue == 2048   ? "#525dffff"
+    : tileValue == 4096   ? "#1827ffff"
+    : tileValue == 8192   ? "#ff4ff6ff"
+    : tileValue == 16384  ? "#ee38ffff"
+    : tileValue == 32768  ? "#d503ffff"
+                          : "#f14af7ff";
 }
 
 function tileForeground(tileValue: number) {
@@ -53,12 +55,14 @@ function tileForeground(tileValue: number) {
     : tileValue == 128    ? "#444"
     : tileValue == 256    ? "#444"
     : tileValue == 512    ? "#444"
-    : tileValue == 1024   ? "#444"
-    : tileValue == 2048   ? "#444"
-    : tileValue == 4096   ? "#444"
+    : tileValue == 1024   ? "#FBF5F2"
+    : tileValue == 2048   ? "#FBF5F2"
+    : tileValue == 4096   ? "#FBF5F2"
+    : tileValue == 8192   ? "#444"
+    : tileValue == 16384  ? "#444"
+    : tileValue == 32768  ? "#444"
                           : "#444";
 }
-
 
 export default function Game() {
     const {width} = useWindowDimensions();
@@ -83,13 +87,28 @@ export default function Game() {
     }, [score]);
 
     useEffect(() => {
-            saveBestScore();             
+        saveBestScore();             
     }, [bestScore]);
+
+    // анімація SCORE
+    useEffect(() => {
+        Animated.sequence([
+            Animated.timing(scoreAnim, {
+                toValue: 1.2,
+                duration: 150,
+                useNativeDriver: true,
+            }),
+            Animated.timing(scoreAnim, {
+                toValue: 1,
+                duration: 150,
+                useNativeDriver: true,
+            }),
+        ]).start();
+    }, [score]);
 
     const saveBestScore = () => {
         const path = RNFS.DocumentDirectoryPath + bestScoreFilename;
         RNFS.writeFile(path, bestScore.toString(), 'utf8')
-
     };
     const loadBestScore = () => {
         const path = RNFS.DocumentDirectoryPath + bestScoreFilename;
@@ -107,7 +126,7 @@ export default function Game() {
         });
     };
 
-        const undoField = () => {
+    const undoField = () => {
         if(savedField == null) return;
         setTiles(savedField!.tiles);
         setScore(savedField!.score);
@@ -122,8 +141,6 @@ export default function Game() {
                               : width * 0.06;
     };
 
-    // swipes - жести проведення з обмеженням мінімальних
-    // відстаней та швидкостей
     const [text,setText] = useState("Game");
     var startData: EventData|null = null;
     const detectSwipe = (finishData: EventData) => {
@@ -131,21 +148,19 @@ export default function Game() {
         const dx = finishData.x - startData!.x;
         const dy = finishData.y - startData!.y;
         const dt = finishData.t - startData!.t;
-        // console.log(dx,dy,dt);
         if(dt < timeThreshold) {
-            if(Math.abs(dx) > Math.abs(dy)) {  // horizontal
+            if(Math.abs(dx) > Math.abs(dy)) {
                 if(Math.abs(dx) > distanceThreshold) {
                     if(dx > 0) {
                         if( canMoveRight() ) {
-                            // збереження стану
-                            moveRight(); // новий рух
+                            moveRight();
                             setText("Right - OK");
                             spawnTile();
                             setTiles([...tiles]);
                         }
                         else {
                             setText("Right - NO MOVE");
-                        }                        
+                        }
                     }
                     else {
                         if( moveLeft() ) {
@@ -155,14 +170,20 @@ export default function Game() {
                         }
                         else {
                             setText("Left - NO MOVE");
-                        }     
+                        }
                     }
                 }
             }
-            else {  // vertical
+            else {
                 if(Math.abs(dy) > distanceThreshold) {
                     if(dy > 0) {
-                        setText("Down");
+                        if (moveDown()) {
+                            setText("Down - OK");
+                            spawnTile();
+                            setTiles([...tiles]);
+                        } else {
+                            setText("Down - NO MOVE");
+                        }
                         Animated.sequence([
                             Animated.timing(animValue, {
                                 toValue: 0,
@@ -177,7 +198,13 @@ export default function Game() {
                         ]).start();
                     }
                     else {
-                        setText("Up");
+                        if (moveUp()) {
+                            setText("Up - OK");
+                            spawnTile();
+                            setTiles([...tiles]);
+                        } else {
+                            setText("Up - NO MOVE");
+                        }
                     }
                 }
             }
@@ -185,12 +212,13 @@ export default function Game() {
     };
 
     const spawnTile = () => {
-        var freeTiles = [];
+        var freeTiles: number[] = [];
         for(let i = 0; i < tiles.length; i += 1) {
             if(tiles[i] == 0) {
                 freeTiles.push(i);
             }
         }
+        if (freeTiles.length === 0) return;
         const randomIndex = freeTiles[Math.floor(Math.random() * freeTiles.length)];
         tiles[randomIndex] = Math.random() < 0.9 ? 2 : 4;
         Animated.sequence([
@@ -220,11 +248,11 @@ export default function Game() {
         const N = 4;
         let res = false;
         for(let r = 0; r < N; r += 1) {
-            for(let i = 1; i < N; i += 1) {                                    
-                for(let c = 0; c < N - 1; c += 1 ) { 
-                    if( tiles[r*N + c + 1] != 0 && tiles[r*N + c] == 0 ) {     
-                        tiles[r*N + c] = tiles[r*N + c + 1];                   
-                        tiles[r*N + c + 1] = 0;                                    
+            for(let i = 1; i < N; i += 1) {
+                for(let c = 0; c < N - 1; c += 1 ) {
+                    if( tiles[r*N + c + 1] != 0 && tiles[r*N + c] == 0 ) {
+                        tiles[r*N + c] = tiles[r*N + c + 1];
+                        tiles[r*N + c + 1] = 0;
                         res = true;
                     }
                 }
@@ -240,9 +268,9 @@ export default function Game() {
             }
 
             for(let i = 1; i < N; i += 1) {
-                for(let c = 0; c < N - 1; c += 1 ) { 
-                    if( tiles[r*N + c + 1] != 0 && tiles[r*N + c] == 0 ) {     
-                        tiles[r*N + c] = tiles[r*N + c + 1];                   
+                for(let c = 0; c < N - 1; c += 1 ) {
+                    if( tiles[r*N + c + 1] != 0 && tiles[r*N + c] == 0 ) {
+                        tiles[r*N + c] = tiles[r*N + c + 1];
                         tiles[r*N + c + 1] = 0;
                     }
                 }
@@ -252,39 +280,31 @@ export default function Game() {
     };
 
     const canMoveRight = () => {
-        for(let r = 0; r < N; r += 1) {  // row index
-            for(let c = 1; c < N; c += 1) {  // column index
+        for(let r = 0; r < N; r += 1) {
+            for(let c = 1; c < N; c += 1) {
                 if( tiles[r*N + c - 1] != 0 && (
                      tiles[r*N + c - 1] == tiles[r*N + c] || tiles[r*N + c] == 0 )
                 ) {
-                    return true; // can move right
+                    return true;
                 }
             }
         }
-        return false; // cannot move right
+        return false;
     };
+
     const moveRight = () => {
-        // [2000] -> [0002]
-        // [0204] -> [0024]
-        // [2002] -> (0022) -> [0004]
-        // [0222] -> (0204) -> [0024]
-        // [2222] -> (0404) -> [0044]
         const N = 4;
-        let res = false;
-        var collapsedIndexes = [];
-        for(let r = 0; r < N; r += 1) {       // row index                     // [2400]
-            // 1. Move right
-            for(let i = 1; i < N; i += 1) {                                    // 
-                for(let c = 0; c < N - 1; c += 1 ) {  // column index          // 
-                    if( tiles[r*N + c] != 0 && tiles[r*N + c + 1] == 0 ) {     // [2040] [2004]
-                        tiles[r*N + c + 1] = tiles[r*N + c];                   // [0204] [0024]
-                        tiles[r*N + c] = 0;                                    // 
+        let collapsedIndexes: number[] = [];
+        for(let r = 0; r < N; r += 1) {
+            for(let i = 1; i < N; i += 1) {
+                for(let c = 0; c < N - 1; c += 1 ) {
+                    if( tiles[r*N + c] != 0 && tiles[r*N + c + 1] == 0 ) {
+                        tiles[r*N + c + 1] = tiles[r*N + c];
+                        tiles[r*N + c] = 0;
                     }
                 }
             }
-
-            // 2. Collapse: from right to left
-            for(let c = N - 1; c > 0; c -= 1 ) {   // [0224] -> [0044]
+            for(let c = N - 1; c > 0; c -= 1 ) {
                 if( tiles[r*N + c] != 0 && tiles[r*N + c - 1] == tiles[r*N + c] ) {
                     tiles[r*N + c] *= 2;
                     tiles[r*N + c - 1] = 0;
@@ -292,15 +312,13 @@ export default function Game() {
                     collapsedIndexes.push(r*N + c);
                 }
             }
-
-            // 3. Move right after collapse
             for(let i = 1; i < N; i += 1) {
                 for(let c = 0; c < N - 1; c += 1 ) {
                     if( tiles[r*N + c] != 0 && tiles[r*N + c + 1] == 0 ) {
                         let index = collapsedIndexes.indexOf(r*N + c);
                         tiles[r*N + c + 1] = tiles[r*N + c];              
                         tiles[r*N + c] = 0;  
-                        collapsedIndexes[index] = r*N + c + 1;                             
+                        if (index !== -1) collapsedIndexes[index] = r*N + c + 1;                             
                     }
                 }
             }
@@ -323,6 +341,70 @@ export default function Game() {
         }
     };
 
+    const moveUp = () => {
+        let res = false;
+        for(let c = 0; c < N; c++) {
+            for(let i = 1; i < N; i++) {
+                for(let r = 1; r < N; r++) {
+                    if(tiles[(r-1)*N + c] == 0 && tiles[r*N + c] != 0) {
+                        tiles[(r-1)*N + c] = tiles[r*N + c];
+                        tiles[r*N + c] = 0;
+                        res = true;
+                    }
+                }
+            }
+            for(let r = 1; r < N; r++) {
+                if(tiles[r*N + c] != 0 && tiles[(r-1)*N + c] == tiles[r*N + c]) {
+                    tiles[(r-1)*N + c] *= 2;
+                    tiles[r*N + c] = 0;
+                    setScore(score + tiles[(r-1)*N + c]);
+                    res = true;
+                }
+            }
+            for(let i = 1; i < N; i++) {
+                for(let r = 1; r < N; r++) {
+                    if(tiles[(r-1)*N + c] == 0 && tiles[r*N + c] != 0) {
+                        tiles[(r-1)*N + c] = tiles[r*N + c];
+                        tiles[r*N + c] = 0;
+                    }
+                }
+            }
+        }
+        return res;
+    };
+
+    const moveDown = () => {
+        let res = false;
+        for(let c = 0; c < N; c++) {
+            for(let i = 1; i < N; i++) {
+                for(let r = N-2; r >= 0; r--) {
+                    if(tiles[(r+1)*N + c] == 0 && tiles[r*N + c] != 0) {
+                        tiles[(r+1)*N + c] = tiles[r*N + c];
+                        tiles[r*N + c] = 0;
+                        res = true;
+                    }
+                }
+            }
+            for(let r = N-2; r >= 0; r--) {
+                if(tiles[r*N + c] != 0 && tiles[(r+1)*N + c] == tiles[r*N + c]) {
+                    tiles[(r+1)*N + c] *= 2;
+                    tiles[r*N + c] = 0;
+                    setScore(score + tiles[(r+1)*N + c]);
+                    res = true;
+                }
+            }
+            for(let i = 1; i < N; i++) {
+                for(let r = N-2; r >= 0; r--) {
+                    if(tiles[(r+1)*N + c] == 0 && tiles[r*N + c] != 0) {
+                        tiles[(r+1)*N + c] = tiles[r*N + c];
+                        tiles[r*N + c] = 0;
+                    }
+                }
+            }
+        }
+        return res;
+    };
+
     return <View style={styles.container}>
         <View style={[styles.topBlock, {marginHorizontal: width * 0.025}]}>
             <Text style={styles.topBlockText}>
@@ -332,7 +414,10 @@ export default function Game() {
                 <View  style={styles.topBlockScores}>
                     <View style={styles.topBlockScore}>
                         <Text style={styles.topBlockScoreText}>SCORE</Text>
-                        <Text style={styles.topBlockScoreText}>{score}</Text>
+                        <Animated.Text 
+                            style={[styles.topBlockScoreText, {transform: [{scale: scoreAnim}]}]}>
+                            {score}
+                        </Animated.Text>
                     </View>
                     
                     <View style={styles.topBlockScore}>
@@ -375,7 +460,7 @@ export default function Game() {
                         color: tileForeground(tile),
                         width: width * 0.21,
                         fontSize: tileFontSize(tile),
-                        fontWeight: 900,
+                        fontWeight: 900 as any,
                         height: width * 0.21,
                         marginLeft: width * 0.022,
                         marginTop: width * 0.022,
